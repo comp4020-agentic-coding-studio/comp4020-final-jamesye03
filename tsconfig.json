@@ -1,6 +1,7 @@
 {
-  // Covers the supplied harness (spec/, scripts/); widen `include` if your app
-  // is TypeScript and you want `pnpm typecheck` to cover it too.
+  // Covers the supplied harness (spec/, scripts/); the app itself is plain
+  // JS (src/), so allowJs lets spec/listings.test.ts import it and get
+  // inferred types instead of `any`, without requiring src/ to be strict.
   "compilerOptions": {
     "target": "ES2023",
     "module": "ESNext",
@@ -11,10 +12,12 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "strict": true,
+    "allowJs": true,
+    "checkJs": false,
     "noEmit": true,
     "skipLibCheck": true,
     "moduleDetection": "force",
     "verbatimModuleSyntax": true
   },
-  "include": ["*.ts", "spec", "scripts"]
+  "include": ["*.ts", "spec", "scripts", "src"]
 }

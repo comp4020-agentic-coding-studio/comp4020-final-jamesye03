@@ -1,0 +1,211 @@
+:root {
+  --accent: #e8630a;
+  --accent-dark: #c04f04;
+  --ink: #1c1c1c;
+  --muted: #6b6b6b;
+  --line: #dedede;
+  --bg: #fafafa;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+a {
+  color: var(--accent-dark);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  position: sticky;
+  top: 0;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin: 0 0 1rem;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.4rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: 1px solid transparent;
+}
+
+.button-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.button-primary:hover {
+  background: var(--accent-dark);
+  text-decoration: none;
+}
+
+.listing-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.listing-card {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.listing-card a {
+  display: block;
+  padding: 0.9rem 1rem;
+  color: var(--ink);
+}
+
+.listing-card:hover {
+  border-color: var(--accent);
+}
+
+.listing-route {
+  font-weight: 600;
+}
+
+.listing-item {
+  color: var(--muted);
+  margin-top: 0.15rem;
+}
+
+.listing-meta {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.listing-countdown {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.empty-state {
+  color: var(--muted);
+}
+
+.back-link {
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.listing-item-full {
+  font-size: 1.05rem;
+}
+
+.listing-detail {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  font-size: 0.95rem;
+}
+
+.listing-detail dt {
+  color: var(--muted);
+}
+
+.listing-detail dd {
+  margin: 0;
+}
+
+.listing-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 28rem;
+}
+
+.listing-form label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-top: 0.6rem;
+}
+
+.listing-form input,
+.listing-form select {
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.listing-form input:focus,
+.listing-form select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.listing-form button {
+  margin-top: 1.1rem;
+  cursor: pointer;
+  border: none;
+  font-size: 1rem;
+}
+
+.form-error {
+  color: #b3261e;
+  font-size: 0.9rem;
+}
+
+.readme {
+  font-size: 0.98rem;
+}
+
+.readme h1 {
+  font-size: 1.5rem;
+}
+
+.readme h2 {
+  font-size: 1.15rem;
+  margin-top: 1.6rem;
+}
+
+.readme img {
+  max-width: 100%;
+}

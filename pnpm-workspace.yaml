@@ -1,3 +1,5 @@
-# esbuild (used by Vitest) needs its postinstall to set up its native binary.
+# esbuild (used by Vitest) and better-sqlite3 (the app's storage) both need
+# their postinstall to compile/set up a native binary.
 allowBuilds:
   esbuild: true
+  better-sqlite3: true
