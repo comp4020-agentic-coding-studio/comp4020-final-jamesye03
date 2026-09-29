@@ -6,21 +6,28 @@ The brief's two hard requirements — genuinely multi-user, genuinely
 real-time, not decorated with them — ruled out most of the first ideas we
 tried. A shared to-do list or a study-room finder can be built single-user
 and retrofitted with "sharing" later; that's the median answer the brief
-warns against. Passing By came out of asking what already can't work
-without a second, differently-motivated person acting inside a closing
-window: a runner's post is only worth anything while their trip is still
-happening, and only if someone else notices in time to act on it.
+warns against. Passing By came out of a real annoyance before it came out of
+the brief: living in BNG, wanting someone to grab something on their way
+back, and the one friend free enough to ask being the exception rather than
+the rule. Opening that same ask up to the whole building is what makes it
+work as a brief response too — it can't function without a second,
+differently-motivated person acting inside a closing window: a runner's post
+is only worth anything while their trip is still happening, and only if
+someone else notices in time to act on it.
 
 ## A correction worth recording
 
 The first version of the identity design asked residents to upload a photo
 of their dorm's door-access card plus a selfie, to verify they actually
-lived in the building. I pushed back on that in the same conversation: this
-repo goes public, there's no real verification pipeline behind the upload
-(so it wouldn't actually catch anyone), and the privacy exposure — real
-photos of ID and faces, sitting in a student project — was out of proportion
-to what the feature bought. We replaced it with an invite link plus a
-self-chosen nickname: social trust instead of a verification system nobody
+lived in the building. I already had a quiet doubt about that before I said
+it out loud — handling real ID photos felt like more than this app should
+take on — but I proposed it anyway without raising the doubt first. Talking
+it through with the agent, and hearing the case laid out concretely (this
+repo goes public; there's no real verification pipeline behind the upload,
+so it wouldn't actually catch anyone; real ID and face photos sitting in a
+student project is a lot of exposure for what the feature buys) turned that
+vague doubt into an actual decision. We replaced it with an invite link plus
+a self-chosen nickname: social trust instead of a verification system nobody
 asked for. `CLAUDE.md` now fixes that decision as a standing rule
 ([`dd4084a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jamesye03/commit/dd4084a)).
 
