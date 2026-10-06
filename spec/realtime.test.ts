@@ -63,3 +63,49 @@ it("pushes a new listing to board subscribers in well under a second, no reload"
 // `isInvolved`, which both the HTTP route and this WS subscribe handler call
 // — spec/threads.test.ts proves that rule directly where it lives, rather
 // than re-deriving it here through a slower, more fragile multi-socket dance.
+
+it("lets a stranger open an active listing to start a first message", async () => {
+  const ws = new WebSocket(wsUrl());
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  ws.send(JSON.stringify({ type: "subscribe", channel: "board" }));
+
+  const marker = `spec-rt-stranger-${Date.now()}`;
+  const received = new Promise<{ id: number }>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("no matching new-listing event within 2s")), 2000);
+    ws.on("message", (raw) => {
+      const data = JSON.parse(raw.toString());
+      if (data.type === "new-listing" && typeof data.html === "string" && data.html.includes(marker)) {
+        clearTimeout(timer);
+        resolve(data);
+      }
+    });
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // This fetch carries no cookie, so the server assigns it a fresh session —
+  // standing in for "the person who posted", distinct from the stranger below.
+  await fetch(new URL("/post", baseUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      origin: marker,
+      destination: "Spec Destination",
+      item: "spec item",
+      nickname: "spec-bot",
+      minutes: "15",
+    }),
+  });
+
+  const { id } = await received;
+  ws.close();
+
+  // A second, separately-cookied fetch: a stranger who never messaged and
+  // isn't the runner. An active (not done) listing must still be reachable
+  // to them — otherwise nobody could ever send a listing's first message.
+  const res = await fetch(new URL(`/listings/${id}`, baseUrl));
+  expect(res.status).toBe(200);
+});

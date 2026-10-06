@@ -97,7 +97,10 @@ app.post("/post", (req, res) => {
 
 app.get("/listings/:id", (req, res) => {
   const listing = activeListing(Number(req.params.id));
-  if (!listing || !isInvolved(listing, req.sessionId)) {
+  // Anyone can open an active listing to start a first message — isInvolved
+  // only gates access once it's done (see CLAUDE.md: done stays reachable
+  // for the runner and anyone already in a thread, not for a new stranger).
+  if (!listing || (listing.done_at && !isInvolved(listing, req.sessionId))) {
     res.status(404).send(renderNotFound());
     return;
   }
@@ -220,7 +223,11 @@ wss.on("connection", (ws, req) => {
       ws.on("close", () => boardSubscribers.delete(ws));
     } else if (msg.type === "subscribe" && msg.channel === "listing" && Number.isInteger(msg.id)) {
       const listing = activeListing(msg.id);
-      if (!listing || !sessionId || !isInvolved(listing, sessionId)) return; // ADR 0001: no access, no subscription
+      // Same relaxation as the GET route: a stranger may watch an active
+      // listing (e.g. waiting on their first message's reply); isInvolved
+      // only gates it once done. Privacy of other threads is still enforced
+      // in broadcastListing by `sub.sessionId`/`sub.isRunner`, not here.
+      if (!listing || !sessionId || (listing.done_at && !isInvolved(listing, sessionId))) return;
       const sub = { ws, sessionId, isRunner: listing.creator_session_id === sessionId };
       if (!listingSubscribers.has(msg.id)) listingSubscribers.set(msg.id, new Set());
       listingSubscribers.get(msg.id).add(sub);
