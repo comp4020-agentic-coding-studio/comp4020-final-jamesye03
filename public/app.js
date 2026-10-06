@@ -5,20 +5,60 @@
 (function () {
   const page = document.body.dataset.page;
   const sessionId = document.body.dataset.sessionId;
-  if (page !== "board" && page !== "listing") return;
 
   function markMine(li) {
     if (li.dataset.sender && li.dataset.sender === sessionId) li.classList.add("chat-msg--mine");
   }
+
+  // See ADR 0002: the server never sends another viewer's raw session id, so
+  // "is this my card" is answered by hashing our own id the same way
+  // (SHA-256, hex) and comparing against each card's data-owner-hash. Guarded
+  // for a non-secure context (no HTTPS, not localhost), where
+  // crypto.subtle is unavailable — the board just skips the highlight.
+  let myHashPromise;
+  async function sha256Hex(text) {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function markOwnListings(root) {
+    if (!window.crypto?.subtle || !sessionId) return;
+    myHashPromise ??= sha256Hex(sessionId);
+    const myHash = await myHashPromise;
+    (root ?? document).querySelectorAll("[data-owner-hash]").forEach((li) => {
+      if (li.dataset.ownerHash === myHash) li.classList.add("listing-card--mine");
+    });
+  }
+
   document.querySelectorAll(".chat-msg").forEach(markMine);
+  if (page === "board") markOwnListings();
+
+  function setNavUnread(total) {
+    const el = document.getElementById("nav-unread");
+    if (!el) return;
+    el.textContent = total > 0 ? String(total) : "";
+    el.hidden = !(total > 0);
+  }
+
+  function setCardUnread(listingId, count) {
+    const badge = document.querySelector(`.listing-card[data-id="${listingId}"] .badge-unread-corner`);
+    if (!badge) return;
+    badge.textContent = count > 0 ? String(count) : "";
+    badge.hidden = !(count > 0);
+  }
+
+  // The nav badge needs a live connection on every page, not just board/
+  // listing — nothing to subscribe to without an identity, though.
+  if (!sessionId) return;
 
   function connect() {
     const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
 
     ws.addEventListener("open", () => {
+      ws.send(JSON.stringify({ type: "subscribe", channel: "me" }));
       if (page === "board") {
         ws.send(JSON.stringify({ type: "subscribe", channel: "board" }));
-      } else {
+      } else if (page === "listing") {
         const el = document.getElementById("chat-threads");
         ws.send(JSON.stringify({ type: "subscribe", channel: "listing", id: Number(el.dataset.listingId) }));
       }
@@ -31,6 +71,8 @@
         const list = document.getElementById("board-list");
         if (list && !list.querySelector(`[data-id="${data.id}"]`)) {
           list.insertAdjacentHTML("afterbegin", data.html);
+          list.firstElementChild.classList.add("listing-card--enter");
+          markOwnListings(list.firstElementChild);
         }
       } else if (data.type === "remove-listing") {
         document.querySelector(`#board-list [data-id="${data.id}"]`)?.remove();
@@ -43,8 +85,17 @@
         thread.lastElementChild.scrollIntoView({ block: "nearest" });
       } else if (data.type === "done") {
         const slot = document.getElementById("done-banner-slot");
-        if (slot && !slot.querySelector("[data-done-banner]")) slot.insertAdjacentHTML("beforeend", data.html);
+        if (slot && !slot.querySelector("[data-done-banner]")) {
+          slot.insertAdjacentHTML("beforeend", data.html);
+        }
         document.querySelector(".done-form")?.remove();
+      } else if (data.type === "unread") {
+        setNavUnread(data.total);
+        // Board and /my render the exact same (hidden-when-zero)
+        // badge-unread-corner markup on a card, so the same lookup+toggle
+        // applies wherever that card happens to be on screen; it's a no-op
+        // via the null check above on any page with no matching card.
+        setCardUnread(data.listingId, data.count);
       }
     });
 

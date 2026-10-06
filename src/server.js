@@ -12,8 +12,11 @@ import {
   isInvolved,
   listingsForSession,
   markDone,
+  markListingRead,
   messagesForThread,
   threadsForListing,
+  totalUnreadCount,
+  unreadCount,
 } from "./db.js";
 import { renderMarkdown } from "./markdown.js";
 import {
@@ -21,6 +24,7 @@ import {
   isValidDeadline,
   listingCardHtml,
   messageHtml,
+  renderAbout,
   renderHome,
   renderListing,
   renderMyChats,
@@ -66,15 +70,28 @@ app.use((req, res, next) => {
 });
 
 app.get("/", (req, res) => {
-  res.send(renderHome(activeListings(), { sessionId: req.sessionId }));
+  // Same badge, same access rule as /my: a board card's unread count is only
+  // ever computed for a listing this viewer is actually involved in — every
+  // other card's is never anything but 0, since a session with no thread and
+  // no ownership has nothing to be "behind" on.
+  const listings = activeListings().map((l) => ({
+    ...l,
+    unread: isInvolved(l, req.sessionId) ? unreadCount(l.id, req.sessionId, l.creator_session_id === req.sessionId) : 0,
+  }));
+  res.send(renderHome(listings, { sessionId: req.sessionId, navUnread: totalUnreadCount(req.sessionId) }));
 });
 
 app.get("/my", (req, res) => {
+  const listings = listingsForSession(req.sessionId).map((l) => ({
+    ...l,
+    unread: unreadCount(l.id, req.sessionId, l.creator_session_id === req.sessionId),
+  }));
   res.send(
     renderMyChats({
       sessionId: req.sessionId,
-      listings: listingsForSession(req.sessionId),
+      listings,
       nickname: readCookie(req, "nickname") ?? "",
+      navUnread: listings.reduce((sum, l) => sum + l.unread, 0),
     }),
   );
 });
@@ -86,7 +103,13 @@ app.post("/my", (req, res) => {
 });
 
 app.get("/post", (req, res) => {
-  res.send(renderPostForm({ nickname: readCookie(req, "nickname") ?? "" }));
+  res.send(
+    renderPostForm({
+      nickname: readCookie(req, "nickname") ?? "",
+      sessionId: req.sessionId,
+      navUnread: totalUnreadCount(req.sessionId),
+    }),
+  );
 });
 
 app.post("/post", (req, res) => {
@@ -94,14 +117,23 @@ app.post("/post", (req, res) => {
   const destination = (req.body.destination ?? "").trim();
   const item = (req.body.item ?? "").trim();
   const nickname = (req.body.nickname ?? "").trim();
+  const fee = (req.body.fee ?? "").trim();
   const minutes = Number(req.body.minutes);
 
   if (!origin || !destination || !item || !nickname || !isValidDeadline(minutes)) {
-    res.status(400).send(renderPostForm({ nickname, error: "Fill in every field and pick a deadline." }));
+    res.status(400).send(
+      renderPostForm({
+        nickname,
+        fee,
+        error: "Fill in every field and pick a deadline.",
+        sessionId: req.sessionId,
+        navUnread: totalUnreadCount(req.sessionId),
+      }),
+    );
     return;
   }
 
-  const id = createListing({ origin, destination, item, nickname, minutes, creatorSessionId: req.sessionId });
+  const id = createListing({ origin, destination, item, nickname, minutes, fee, creatorSessionId: req.sessionId });
   res.setHeader("Set-Cookie", nicknameCookie(nickname));
   res.redirect("/");
   broadcastBoard({ type: "new-listing", id, html: listingCardHtml(activeListing(id)) });
@@ -120,6 +152,9 @@ app.get("/listings/:id", (req, res) => {
   const threads = isRunner
     ? threadsForListing(listing.id)
     : [{ requesterSessionId: req.sessionId, messages: messagesForThread(listing.id, req.sessionId) }];
+  // Badges live on /my only (see db.js), but this page is where "read" is
+  // earned — opening a listing you're involved in resets its unread count.
+  markListingRead(listing.id, req.sessionId);
   res.send(
     renderListing({
       listing,
@@ -127,8 +162,12 @@ app.get("/listings/:id", (req, res) => {
       isRunner,
       threads,
       nickname: readCookie(req, "nickname") ?? "",
+      navUnread: totalUnreadCount(req.sessionId),
     }),
   );
+  // A second tab (e.g. still sitting on /my) should see this listing's
+  // badge clear live too, not just on its own next reload.
+  pushUnread(req.sessionId, listing.id);
 });
 
 app.post("/listings/:id/messages", (req, res) => {
@@ -177,6 +216,9 @@ app.post("/listings/:id/messages", (req, res) => {
     thread: requesterSessionId,
     html: messageHtml({ sender_session_id: req.sessionId, nickname, body, created_at: createdAt }),
   });
+  // The sender's own messages never count as unread to themselves (db.js),
+  // so only the other party in this thread has anything to be pushed.
+  pushUnread(isRunner ? requesterSessionId : listing.creator_session_id, listingId);
 });
 
 app.post("/listings/:id/done", (req, res) => {
@@ -194,13 +236,17 @@ app.post("/listings/:id/done", (req, res) => {
   broadcastListing(listingId, { type: "done", html: doneBannerHtml() });
 });
 
+app.get("/about", (req, res) => {
+  res.send(renderAbout({ sessionId: req.sessionId, navUnread: totalUnreadCount(req.sessionId) }));
+});
+
 app.get("/readme/", (req, res) => {
   const markdown = readFileSync("README.md", "utf8");
-  res.send(renderReadme(renderMarkdown(markdown)));
+  res.send(renderReadme(renderMarkdown(markdown), { sessionId: req.sessionId, navUnread: totalUnreadCount(req.sessionId) }));
 });
 
 app.use((req, res) => {
-  res.status(404).send(renderNotFound());
+  res.status(404).send(renderNotFound({ sessionId: req.sessionId, navUnread: totalUnreadCount(req.sessionId) }));
 });
 
 // A plain HTTP server underneath Express, so the `ws` upgrade handler can
@@ -210,10 +256,30 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 
 const boardSubscribers = new Set();
 const listingSubscribers = new Map(); // listing id -> Set<{ ws, sessionId, isRunner }>
+const meSubscribers = new Map(); // sessionId -> Set<ws>
 
 function broadcastBoard(event) {
   const payload = JSON.stringify(event);
   for (const ws of boardSubscribers) if (ws.readyState === ws.OPEN) ws.send(payload);
+}
+
+// Unread counts are pushed, never broadcast: this only ever reaches sockets
+// the owning session itself opened (meSubscribers is keyed by that session's
+// own cookie, read once at WS connection time) — same boundary PROCESS.md
+// already draws for these badges, just delivered live instead of on load.
+function pushUnread(sessionId, listingId) {
+  const subs = meSubscribers.get(sessionId);
+  if (!subs?.size) return;
+  const listing = activeListing(listingId);
+  if (!listing) return;
+  const isRunner = listing.creator_session_id === sessionId;
+  const payload = JSON.stringify({
+    type: "unread",
+    listingId,
+    count: unreadCount(listingId, sessionId, isRunner),
+    total: totalUnreadCount(sessionId),
+  });
+  for (const ws of subs) if (ws.readyState === ws.OPEN) ws.send(payload);
 }
 
 // `done` reaches every subscriber on the listing; `message` only reaches the
@@ -241,6 +307,11 @@ wss.on("connection", (ws, req) => {
     if (msg.type === "subscribe" && msg.channel === "board") {
       boardSubscribers.add(ws);
       ws.on("close", () => boardSubscribers.delete(ws));
+    } else if (msg.type === "subscribe" && msg.channel === "me") {
+      if (!sessionId) return;
+      if (!meSubscribers.has(sessionId)) meSubscribers.set(sessionId, new Set());
+      meSubscribers.get(sessionId).add(ws);
+      ws.on("close", () => meSubscribers.get(sessionId)?.delete(ws));
     } else if (msg.type === "subscribe" && msg.channel === "listing" && Number.isInteger(msg.id)) {
       const listing = activeListing(msg.id);
       // Same relaxation as the GET route: a stranger may watch an active
@@ -257,5 +328,5 @@ wss.on("connection", (ws, req) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Passing By listening on 0.0.0.0:${PORT}`);
+  console.log(`DormRunner listening on 0.0.0.0:${PORT}`);
 });

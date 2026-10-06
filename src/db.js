@@ -33,6 +33,10 @@ function ensureColumn(table, column, ddl) {
 }
 ensureColumn("listings", "creator_session_id", "creator_session_id TEXT NOT NULL DEFAULT ''");
 ensureColumn("listings", "done_at", "done_at INTEGER");
+// Optional, free-text "what I'd like to earn" hint — not a payment field,
+// see CLAUDE.md's carve-out. Nullable like done_at: existing rows and any
+// caller that omits it read back null, never an empty string.
+ensureColumn("listings", "fee", "fee TEXT");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -47,11 +51,11 @@ db.exec(`
 `);
 
 const insertListing = db.prepare(`
-  INSERT INTO listings (origin, destination, item, nickname, creator_session_id, created_at, expires_at)
-  VALUES (@origin, @destination, @item, @nickname, @creator_session_id, @created_at, @expires_at)
+  INSERT INTO listings (origin, destination, item, nickname, creator_session_id, fee, created_at, expires_at)
+  VALUES (@origin, @destination, @item, @nickname, @creator_session_id, @fee, @created_at, @expires_at)
 `);
 
-export function createListing({ origin, destination, item, nickname, minutes, creatorSessionId }) {
+export function createListing({ origin, destination, item, nickname, minutes, creatorSessionId, fee = "" }) {
   const created_at = Date.now();
   const expires_at = created_at + minutes * 60_000;
   const { lastInsertRowid } = insertListing.run({
@@ -60,6 +64,7 @@ export function createListing({ origin, destination, item, nickname, minutes, cr
     item,
     nickname,
     creator_session_id: creatorSessionId,
+    fee: fee || null,
     created_at,
     expires_at,
   });
@@ -127,6 +132,51 @@ export function threadsForListing(listingId) {
   }));
 }
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS listing_reads (
+    listing_id INTEGER NOT NULL REFERENCES listings(id),
+    viewer_session_id TEXT NOT NULL,
+    last_read_at INTEGER NOT NULL,
+    PRIMARY KEY (listing_id, viewer_session_id)
+  )
+`);
+
+// One row per (listing, viewer), not per thread: a viewer's role is fixed
+// per listing — the runner's id is the same across every thread they can
+// see on their own listing, and a requester only ever has one thread here.
+export function markListingRead(listingId, viewerSessionId) {
+  db.prepare(`
+    INSERT INTO listing_reads (listing_id, viewer_session_id, last_read_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT (listing_id, viewer_session_id)
+    DO UPDATE SET last_read_at = excluded.last_read_at
+  `).run(listingId, viewerSessionId, Date.now());
+}
+
+// isRunner decides the scope: a runner's count spans every thread on their
+// own listing (same access threadsForListing already grants them); a
+// requester's count is pinned to their own thread by requester_session_id,
+// which can never match anyone else's — see ADR 0002.
+export function unreadCount(listingId, viewerSessionId, isRunner) {
+  const lastRead =
+    db
+      .prepare(`SELECT last_read_at FROM listing_reads WHERE listing_id = ? AND viewer_session_id = ?`)
+      .get(listingId, viewerSessionId)?.last_read_at ?? 0;
+
+  return isRunner
+    ? db
+        .prepare(
+          `SELECT COUNT(*) c FROM messages WHERE listing_id = ? AND sender_session_id != ? AND created_at > ?`,
+        )
+        .get(listingId, viewerSessionId, lastRead).c
+    : db
+        .prepare(
+          `SELECT COUNT(*) c FROM messages
+           WHERE listing_id = ? AND requester_session_id = ? AND sender_session_id != ? AND created_at > ?`,
+        )
+        .get(listingId, viewerSessionId, viewerSessionId, lastRead).c;
+}
+
 export function hasThread(listingId, sessionId) {
   return Boolean(
     db
@@ -155,4 +205,13 @@ export function listingsForSession(sessionId) {
        ORDER BY created_at DESC`,
     )
     .all(Date.now(), sessionId, sessionId);
+}
+
+// The nav-wide badge: same scoping as the per-listing count, just summed
+// across every listing this session has standing access to.
+export function totalUnreadCount(sessionId) {
+  return listingsForSession(sessionId).reduce(
+    (sum, l) => sum + unreadCount(l.id, sessionId, l.creator_session_id === sessionId),
+    0,
+  );
 }

@@ -46,3 +46,26 @@ it("keeps an unexpired listing visible in both queries", () => {
   expect(db.activeListings().some((l: { id: number }) => l.id === id)).toBe(true);
   expect(db.activeListing(id)?.id).toBe(id);
 });
+
+it("stores an optional fee hint, and leaves it falsy when omitted", () => {
+  const withFee = db.createListing({
+    origin: "Test Origin",
+    destination: "Test Destination",
+    item: "Test item",
+    nickname: "tester",
+    creatorSessionId: "tester-session",
+    minutes: 30,
+    fee: "$5",
+  });
+  expect(db.activeListing(withFee)?.fee).toBe("$5");
+
+  const withoutFee = db.createListing({
+    origin: "Test Origin",
+    destination: "Test Destination",
+    item: "Test item",
+    nickname: "tester",
+    creatorSessionId: "tester-session",
+    minutes: 30,
+  });
+  expect(db.activeListing(withoutFee)?.fee).toBeFalsy();
+});

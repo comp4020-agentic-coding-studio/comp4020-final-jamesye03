@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const DEADLINE_OPTIONS = [
   { minutes: 15, label: "15 minutes" },
   { minutes: 30, label: "30 minutes" },
@@ -19,21 +21,29 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function layout({ title, body, page = "", sessionId = "" }) {
+// One-way marker for "this listing is yours", safe to broadcast to every
+// board viewer — see ADR 0002. Never send the raw session id itself.
+function ownerHash(sessionId) {
+  return createHash("sha256").update(sessionId).digest("hex");
+}
+
+function layout({ title, body, page = "", sessionId = "", navUnread = 0 }) {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,400,0,0" />
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body data-page="${escapeHtml(page)}" data-session-id="${escapeHtml(sessionId)}">
 <header class="site-header">
-  <a class="brand" href="/">Passing By</a>
+  <a class="brand" href="/"><span class="brand-mark"><span class="material-symbols-rounded" aria-hidden="true">delivery_dining</span></span> DormRunner</a>
   <nav class="site-nav">
-    <a href="/my">My chats</a>
-    <a class="button button-primary" href="/post">Post</a>
+    <a href="/about"><span class="material-symbols-rounded" aria-hidden="true">help</span> How it works</a>
+    <a href="/my">My chats<span class="badge-unread-nav" id="nav-unread"${navUnread ? "" : " hidden"}>${navUnread || ""}</span></a>
+    <a class="button button-primary" href="/post"><span class="material-symbols-rounded" aria-hidden="true">add</span> Post</a>
   </nav>
 </header>
 <main>
@@ -64,52 +74,66 @@ function timeAgo(createdAt, now = Date.now()) {
 
 // Shared between the SSR board render and the "new-listing" WS broadcast
 // (src/server.js), so a card looks identical how ever it reached the page.
-export function listingCardHtml(l) {
-  return `<li class="listing-card" data-id="${l.id}">
+// `unread` defaults to 0 because the WS broadcast call always means "just
+// created" (nobody's had time to message yet), so that caller never needs
+// to pass one — a real per-viewer count only ever comes from the SSR path,
+// same as the /my card below, and only for listings this viewer is actually
+// involved in (src/server.js checks isInvolved before computing it).
+export function listingCardHtml(l, { unread = 0 } = {}) {
+  return `<li class="listing-card" data-id="${l.id}" data-owner-hash="${ownerHash(l.creator_session_id)}">
+      <span class="badge-unread-corner"${unread ? "" : " hidden"}>${unread || ""}</span>
       <a href="/listings/${l.id}">
-        <div class="listing-route">${escapeHtml(l.origin)} &rarr; ${escapeHtml(l.destination)}</div>
+        <div class="listing-route">${escapeHtml(l.origin)} <span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span> ${escapeHtml(l.destination)}</div>
         <div class="listing-item">${escapeHtml(l.item)}</div>
+        ${l.fee ? `<div class="listing-fee"><span class="material-symbols-rounded" aria-hidden="true">payments</span> ${escapeHtml(l.fee)}</div>` : ""}
         <div class="listing-meta">
           <span>${escapeHtml(l.nickname)}</span>
           <span aria-hidden="true">&middot;</span>
           <span>${timeAgo(l.created_at)}</span>
           <span aria-hidden="true">&middot;</span>
-          <span class="listing-countdown" data-expires-at="${l.expires_at}">${timeLeft(l.expires_at)}</span>
+          <span class="listing-countdown-wrap"><span class="material-symbols-rounded" aria-hidden="true">schedule</span> <span class="listing-countdown" data-expires-at="${l.expires_at}">${timeLeft(l.expires_at)}</span></span>
         </div>
       </a>
     </li>`;
 }
 
-export function renderHome(listings, { sessionId = "" } = {}) {
+export function renderHome(listings, { sessionId = "", navUnread = 0 } = {}) {
   const items = listings.length
-    ? listings.map(listingCardHtml).join("\n")
-    : `<p class="empty-state">Nobody's out running errands right now. Be the first &mdash; <a href="/post">post one</a>.</p>`;
+    ? listings.map((l) => listingCardHtml(l, { unread: l.unread })).join("\n")
+    : `<p class="empty-state"><span class="material-symbols-rounded" aria-hidden="true">inbox</span> Nobody's out running errands right now. Be the first &mdash; <a href="/post">post one</a>.</p>`;
 
   return layout({
-    title: "Passing By",
+    title: "DormRunner",
     page: "board",
     sessionId,
-    body: `<h1>Who's out right now</h1>
+    navUnread,
+    body: `<div class="brand-mark brand-mark--hero"><span class="material-symbols-rounded" aria-hidden="true">delivery_dining</span></div>
+    <h1>Who's out right now</h1>
     <ul class="listing-list" id="board-list">${items}</ul>`,
   });
 }
 
-export function renderPostForm({ nickname = "", error = "" } = {}) {
+export function renderPostForm({ nickname = "", fee = "", error = "", sessionId = "", navUnread = 0 } = {}) {
   const options = DEADLINE_OPTIONS.map((o) => `<option value="${o.minutes}">${o.label}</option>`).join("");
 
   return layout({
-    title: "Post a run — Passing By",
+    title: "Post a run — DormRunner",
+    sessionId,
+    navUnread,
     body: `<h1>Post a run</h1>
     ${error ? `<p class="form-error">${escapeHtml(error)}</p>` : ""}
     <form method="post" action="/post" class="listing-form">
-      <label for="origin">Where you're at</label>
-      <input id="origin" name="origin" required maxlength="60" placeholder="e.g. Union Court Maccas" />
+      <label for="origin">From</label>
+      <input id="origin" name="origin" required maxlength="60" />
 
-      <label for="destination">Where you're headed back to</label>
-      <input id="destination" name="destination" required maxlength="60" placeholder="e.g. BNG Block C" />
+      <label for="destination">To</label>
+      <input id="destination" name="destination" required maxlength="60" />
 
-      <label for="item">What you can bring back</label>
-      <input id="item" name="item" required maxlength="120" placeholder="e.g. a couple of burgers, whatever's quick" />
+      <label for="item">What can you bring</label>
+      <input id="item" name="item" required maxlength="120" />
+
+      <label for="fee">What you'd like to earn (optional)</label>
+      <input id="fee" name="fee" maxlength="40" value="${escapeHtml(fee)}" />
 
       <label for="nickname">Your nickname</label>
       <input id="nickname" name="nickname" required maxlength="30" value="${escapeHtml(nickname)}" placeholder="how people should ask for you" />
@@ -117,7 +141,7 @@ export function renderPostForm({ nickname = "", error = "" } = {}) {
       <label for="minutes">How long is this open</label>
       <select id="minutes" name="minutes">${options}</select>
 
-      <button type="submit" class="button button-primary">Post it</button>
+      <button type="submit" class="button button-primary"><span class="material-symbols-rounded" aria-hidden="true">add</span> Post it</button>
     </form>`,
   });
 }
@@ -139,7 +163,7 @@ function chatForm({ listingId, thread = "", nickname = "" }) {
       ${thread ? `<input type="hidden" name="thread" value="${escapeHtml(thread)}" />` : ""}
       <input name="nickname" value="${escapeHtml(nickname)}" maxlength="30" required placeholder="your nickname" />
       <input name="body" maxlength="500" required placeholder="say something…" />
-      <button type="submit" class="button button-primary">Send</button>
+      <button type="submit" class="button button-primary"><span class="material-symbols-rounded" aria-hidden="true">send</span> Send</button>
     </form>`;
 }
 
@@ -150,7 +174,7 @@ function chatForm({ listingId, thread = "", nickname = "" }) {
 function threadSectionHtml({ listingId, requesterSessionId, messages, heading, nickname = "" }) {
   const list = messages.length
     ? messages.map(messageHtml).join("\n")
-    : `<p class="empty-state">No messages yet.</p>`;
+    : `<p class="empty-state"><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span> No messages yet.</p>`;
   return `<section class="chat-thread" data-thread="${escapeHtml(requesterSessionId)}">
       ${heading ? `<h3>${escapeHtml(heading)}</h3>` : ""}
       <ul class="chat-messages">${list}</ul>
@@ -159,10 +183,10 @@ function threadSectionHtml({ listingId, requesterSessionId, messages, heading, n
 }
 
 export function doneBannerHtml() {
-  return `<p class="done-banner" data-done-banner>Marked done — off the public board now, but this page still works for everyone who was already talking here.</p>`;
+  return `<p class="done-banner" data-done-banner><span class="material-symbols-rounded" aria-hidden="true">check_circle</span> Marked done — off the public board now, but this page still works for everyone who was already talking here.</p>`;
 }
 
-export function renderListing({ listing, sessionId, isRunner, threads, nickname = "" }) {
+export function renderListing({ listing, sessionId, isRunner, threads, nickname = "", navUnread = 0 }) {
   const threadsHtml = isRunner
     ? threads.length
       ? threads
@@ -176,7 +200,7 @@ export function renderListing({ listing, sessionId, isRunner, threads, nickname 
             }),
           )
           .join("\n")
-      : `<p class="empty-state">No one's messaged you yet.</p>`
+      : `<p class="empty-state"><span class="material-symbols-rounded" aria-hidden="true">chat_bubble</span> No one's messaged you yet.</p>`
     : threadSectionHtml({
         listingId: listing.id,
         requesterSessionId: sessionId,
@@ -185,22 +209,24 @@ export function renderListing({ listing, sessionId, isRunner, threads, nickname 
       });
 
   return layout({
-    title: `${listing.origin} to ${listing.destination} — Passing By`,
+    title: `${listing.origin} to ${listing.destination} — DormRunner`,
     page: "listing",
     sessionId,
-    body: `<p class="back-link"><a href="/">&larr; back to the board</a></p>
-    <h1>${escapeHtml(listing.origin)} &rarr; ${escapeHtml(listing.destination)}</h1>
+    navUnread,
+    body: `<p class="back-link"><a href="/" class="button button-secondary"><span class="material-symbols-rounded" aria-hidden="true">arrow_back</span> Back to the board</a></p>
+    <h1>${escapeHtml(listing.origin)} <span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span> ${escapeHtml(listing.destination)}</h1>
     <p class="listing-item-full">${escapeHtml(listing.item)}</p>
     <dl class="listing-detail">
       <dt>Posted by</dt><dd>${escapeHtml(listing.nickname)}</dd>
+      ${listing.fee ? `<dt><span class="material-symbols-rounded" aria-hidden="true">payments</span> Fee</dt><dd>${escapeHtml(listing.fee)}</dd>` : ""}
       <dt>Posted</dt><dd>${timeAgo(listing.created_at)}</dd>
-      <dt>Open for</dt><dd>${timeLeft(listing.expires_at)}</dd>
+      <dt><span class="material-symbols-rounded" aria-hidden="true">schedule</span> Open for</dt><dd>${timeLeft(listing.expires_at)}</dd>
     </dl>
     <div id="done-banner-slot">${listing.done_at ? doneBannerHtml() : ""}</div>
     ${
       isRunner && !listing.done_at
         ? `<form method="post" action="/listings/${listing.id}/done" class="done-form">
-      <button type="submit" class="button button-secondary">Mark as done</button>
+      <button type="submit" class="button button-secondary"><span class="material-symbols-rounded" aria-hidden="true">check</span> Mark as done</button>
     </form>`
         : ""
     }
@@ -214,18 +240,19 @@ export function renderListing({ listing, sessionId, isRunner, threads, nickname 
 function profileFormHtml(nickname) {
   return `<form method="post" action="/my" class="profile-form">
       <input name="nickname" value="${escapeHtml(nickname)}" maxlength="30" required placeholder="how people should ask for you" />
-      <button type="submit" class="button button-secondary">Save</button>
+      <button type="submit" class="button button-secondary"><span class="material-symbols-rounded" aria-hidden="true">person</span> Save</button>
     </form>`;
 }
 
-export function renderMyChats({ sessionId, listings, nickname = "" }) {
+export function renderMyChats({ sessionId, listings, nickname = "", navUnread = 0 }) {
   const items = listings.length
     ? listings
         .map((l) => {
           const mine = l.creator_session_id === sessionId;
-          return `<li class="listing-card">
+          return `<li class="listing-card" data-id="${l.id}">
+      <span class="badge-unread-corner"${l.unread ? "" : " hidden"}>${l.unread || ""}</span>
       <a href="/listings/${l.id}">
-        <div class="listing-route">${escapeHtml(l.origin)} &rarr; ${escapeHtml(l.destination)}</div>
+        <div class="listing-route">${escapeHtml(l.origin)} <span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span> ${escapeHtml(l.destination)}</div>
         <div class="listing-item">${escapeHtml(l.item)}</div>
         <div class="listing-meta">
           <span>${mine ? "You posted this" : "You messaged about this"}</span>
@@ -236,12 +263,13 @@ export function renderMyChats({ sessionId, listings, nickname = "" }) {
     </li>`;
         })
         .join("\n")
-    : `<p class="empty-state">Nothing yet — post a run or message someone on the <a href="/">board</a>.</p>`;
+    : `<p class="empty-state"><span class="material-symbols-rounded" aria-hidden="true">inbox</span> Nothing yet — post a run or message someone on the <a href="/">board</a>.</p>`;
 
   return layout({
-    title: "My chats — Passing By",
+    title: "My chats — DormRunner",
     page: "my-chats",
     sessionId,
+    navUnread,
     body: `<h1>My chats</h1>
     <h2>Your nickname</h2>
     ${profileFormHtml(nickname)}
@@ -249,16 +277,66 @@ export function renderMyChats({ sessionId, listings, nickname = "" }) {
   });
 }
 
-export function renderNotFound() {
+// Plain-language orientation for a first-time visitor — deliberately not the
+// same thing as /readme/ (which serves README.md's own project write-up, in
+// the voice that's aimed at a marker, not a BNG resident deciding whether to
+// tap "Post"). CLAUDE.md: English only, so this stays English even though
+// the ask for it came through in Chinese.
+export function renderAbout({ sessionId = "", navUnread = 0 } = {}) {
   return layout({
-    title: "Not found — Passing By",
+    title: "How it works — DormRunner",
+    page: "about",
+    sessionId,
+    navUnread,
+    body: `<h1>How this works</h1>
+    <p>DormRunner is a simple board for people living in BNG. If you're
+    heading out and don't mind grabbing something for someone, post it. If
+    you need something, check the board and message whoever's already
+    heading out.</p>
+
+    <ol class="about-steps">
+      <li><strong>Heading out?</strong> Tap "Post", say where you're going,
+        what you can bring back, and how long before you're back. It shows
+        up on the board right away.</li>
+      <li><strong>Need something?</strong> Open the board, find someone
+        going somewhere useful, and tap their post to send them a
+        message.</li>
+      <li><strong>Chatting is live.</strong> No need to refresh — replies
+        just show up on the page.</li>
+      <li><strong>Errand done?</strong> Whoever posted it marks it "done".
+        It comes off the board, but the chat stays open for anyone already
+        talking there.</li>
+      <li><strong>Posts don't last forever.</strong> Each one shows a
+        countdown and disappears on its own once the time's up.</li>
+      <li><strong>"My chats"</strong> keeps track of everything you've
+        posted or messaged about, with a number next to it whenever there's
+        something new to read.</li>
+    </ol>
+
+    <h2>Good to know</h2>
+    <ul class="about-notes">
+      <li>No sign-up, no account — just open the site and go.</li>
+      <li>No ratings, and no payment built into the app. If money's
+        changing hands, sort it out directly with the other person, the
+        same way you would with a friend.</li>
+    </ul>`,
+  });
+}
+
+export function renderNotFound({ sessionId = "", navUnread = 0 } = {}) {
+  return layout({
+    title: "Not found — DormRunner",
+    sessionId,
+    navUnread,
     body: `<h1>Not found</h1><p>This listing doesn't exist, or its window's closed. <a href="/">Back to the board</a>.</p>`,
   });
 }
 
-export function renderReadme(bodyHtml) {
+export function renderReadme(bodyHtml, { sessionId = "", navUnread = 0 } = {}) {
   return layout({
-    title: "About — Passing By",
+    title: "About — DormRunner",
+    sessionId,
+    navUnread,
     body: `<article class="readme">${bodyHtml}</article>`,
   });
 }
