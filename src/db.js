@@ -22,12 +22,36 @@ db.exec(`
   )
 `);
 
-const insertListing = db.prepare(`
-  INSERT INTO listings (origin, destination, item, nickname, created_at, expires_at)
-  VALUES (@origin, @destination, @item, @nickname, @created_at, @expires_at)
+// Added for crit 9. ALTER .. ADD COLUMN rather than a fresh CREATE so rows
+// from the crit-8 deploy survive the upgrade (CLAUDE.md: never delete for a
+// schema change any more than for an expiry).
+function ensureColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+ensureColumn("listings", "creator_session_id", "creator_session_id TEXT NOT NULL DEFAULT ''");
+ensureColumn("listings", "done_at", "done_at INTEGER");
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER NOT NULL REFERENCES listings(id),
+    requester_session_id TEXT NOT NULL,
+    sender_session_id TEXT NOT NULL,
+    nickname TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )
 `);
 
-export function createListing({ origin, destination, item, nickname, minutes }) {
+const insertListing = db.prepare(`
+  INSERT INTO listings (origin, destination, item, nickname, creator_session_id, created_at, expires_at)
+  VALUES (@origin, @destination, @item, @nickname, @creator_session_id, @created_at, @expires_at)
+`);
+
+export function createListing({ origin, destination, item, nickname, minutes, creatorSessionId }) {
   const created_at = Date.now();
   const expires_at = created_at + minutes * 60_000;
   const { lastInsertRowid } = insertListing.run({
@@ -35,19 +59,100 @@ export function createListing({ origin, destination, item, nickname, minutes }) 
     destination,
     item,
     nickname,
+    creator_session_id: creatorSessionId,
     created_at,
     expires_at,
   });
   return lastInsertRowid;
 }
 
-// CLAUDE.md: expired listings are hidden by this filter, never deleted.
+// CLAUDE.md: expired listings are hidden by this filter, never deleted. Done
+// listings are hidden here too (crit 9: done = off the public board), but
+// `activeListing` below still finds them, because the people actually
+// involved keep access past "done".
 export function activeListings() {
   return db
-    .prepare(`SELECT * FROM listings WHERE expires_at > ? ORDER BY created_at DESC`)
+    .prepare(`SELECT * FROM listings WHERE expires_at > ? AND done_at IS NULL ORDER BY created_at DESC`)
     .all(Date.now());
 }
 
 export function activeListing(id) {
   return db.prepare(`SELECT * FROM listings WHERE id = ? AND expires_at > ?`).get(id, Date.now());
+}
+
+export function markDone(id) {
+  db.prepare(`UPDATE listings SET done_at = ? WHERE id = ?`).run(Date.now(), id);
+}
+
+const insertMessage = db.prepare(`
+  INSERT INTO messages (listing_id, requester_session_id, sender_session_id, nickname, body, created_at)
+  VALUES (@listing_id, @requester_session_id, @sender_session_id, @nickname, @body, @created_at)
+`);
+
+export function addMessage({ listingId, requesterSessionId, senderSessionId, nickname, body }) {
+  const created_at = Date.now();
+  insertMessage.run({
+    listing_id: listingId,
+    requester_session_id: requesterSessionId,
+    sender_session_id: senderSessionId,
+    nickname,
+    body,
+    created_at,
+  });
+  return created_at;
+}
+
+// One thread per requester session: everything they and the runner said to
+// each other on this listing, in order.
+export function messagesForThread(listingId, requesterSessionId) {
+  return db
+    .prepare(
+      `SELECT * FROM messages WHERE listing_id = ? AND requester_session_id = ? ORDER BY created_at ASC`,
+    )
+    .all(listingId, requesterSessionId);
+}
+
+// The runner's view: every thread this listing has, newest activity first.
+export function threadsForListing(listingId) {
+  const requesterIds = db
+    .prepare(
+      `SELECT requester_session_id FROM messages WHERE listing_id = ?
+       GROUP BY requester_session_id ORDER BY MAX(created_at) DESC`,
+    )
+    .all(listingId)
+    .map((r) => r.requester_session_id);
+  return requesterIds.map((requesterSessionId) => ({
+    requesterSessionId,
+    messages: messagesForThread(listingId, requesterSessionId),
+  }));
+}
+
+export function hasThread(listingId, sessionId) {
+  return Boolean(
+    db
+      .prepare(`SELECT 1 FROM messages WHERE listing_id = ? AND requester_session_id = ? LIMIT 1`)
+      .get(listingId, sessionId),
+  );
+}
+
+// ADR 0001: a listing stays reachable, past "done", only for the runner and
+// whoever already has a thread on it — nobody else, done or not.
+export function isInvolved(listing, sessionId) {
+  return listing.creator_session_id === sessionId || hasThread(listing.id, sessionId);
+}
+
+// "My chats": everything a session posted or messaged into, while it's still
+// within its own window — expired drops out of every query alike, this one
+// included, per the same CLAUDE.md rule `activeListings` follows.
+export function listingsForSession(sessionId) {
+  return db
+    .prepare(
+      `SELECT * FROM listings
+       WHERE expires_at > ?
+         AND (creator_session_id = ? OR id IN (
+           SELECT DISTINCT listing_id FROM messages WHERE requester_session_id = ?
+         ))
+       ORDER BY created_at DESC`,
+    )
+    .all(Date.now(), sessionId, sessionId);
 }

@@ -22,6 +22,7 @@ it("hides an expired listing from both queries, but keeps its row", () => {
     destination: "Test Destination",
     item: "Test item",
     nickname: "tester",
+    creatorSessionId: "tester-session",
     minutes: -1,
   });
 
@@ -38,6 +39,7 @@ it("keeps an unexpired listing visible in both queries", () => {
     destination: "Test Destination",
     item: "Test item",
     nickname: "tester",
+    creatorSessionId: "tester-session",
     minutes: 30,
   });
 
