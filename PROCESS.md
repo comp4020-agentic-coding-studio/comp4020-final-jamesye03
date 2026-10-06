@@ -40,7 +40,7 @@ plus `better-sqlite3`, server-rendered HTML with no client framework, keeps
 the whole app inside the 256 MB/one-machine envelope and gives crit 9's chat
 a normal place to attach a `ws` server next week.
 
-## Page design, agreed before building
+## Page design, agreed before building (crit 8)
 
 Before writing any app code we fixed: three separate pages (board, post
 form, listing detail) reached by full navigations rather than a modal; the
@@ -52,10 +52,66 @@ UI. The scaffold in
 builds exactly that, plus the expiry contract as a spec test in
 [`cc4eb26`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jamesye03/commit/cc4eb26).
 
+## Crit 9: identity, chat, and what "real-time" means here
+
+Chat needs some notion of "who's asking", without accounts. We added one
+opaque `session_id` cookie, set on first visit and never tied to anything a
+person types in — it's a second cookie next to the existing cosmetic
+`nickname` one, and it's the only thing that makes "this thread belongs to
+this browser" meaningful. That single id is also what decides who can see a
+thread: `isInvolved(listing, sessionId)` in `src/db.js` is the one place
+that rule is written, and both the page route and the WebSocket subscribe
+handler call it, so the privacy guarantee can't quietly diverge between the
+two
+([`72cf8fd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jamesye03/commit/72cf8fd)).
+
+That privacy shape — one private thread per requester, the runner sees all
+of theirs — is this week's required multi-user decision, written up as
+[`docs/adr/0001-private-threads-per-requester.md`](docs/adr/0001-private-threads-per-requester.md)
+([`c14a352`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jamesye03/commit/c14a352)).
+It's grounded in README's own definition of "good" — this is meant to feel
+like asking a neighbour a favour, not gig work — which is also why a shared
+group chat per listing was the live alternative we rejected: it would make
+every requester's ask visible to every other stranger who asked the same
+runner, which is a worse fit for what the app is supposed to feel like, not
+just a different implementation of the same thing.
+
+"Real-time" here means something narrower than "always pushing": a
+countdown ticking down is just time passing, and the client already knows a
+listing's deadline, so it counts down locally with no server round-trip.
+What actually needs a push is *someone else's action* landing in a session
+that's already open — a new listing appearing on the board, a message
+arriving in a thread, a listing flipping to done — because those are the
+moments the brief's "within about a second, no reload" requirement is
+actually about. We picked WebSocket over SSE or polling because it's
+bidirectional on the same connection the client already needs for nothing
+else, it attaches to the same HTTP server Express already runs (one Fly
+machine, one process), and crit 8's stack choice was already made with this
+in mind. Every user-initiated change, though, still goes through a plain
+HTML `<form method="post">` with a full-page redirect — the actor driving
+the form gets their new state the normal way; WebSocket only pushes to the
+*other* sessions that are already sitting on the page. That split meant we
+never had to intercept a form submit with JavaScript, and the HTML pushed
+over the socket is rendered by the exact same `views.js` functions the
+server uses for a normal page load, so there's one template for a listing
+card or a chat message, not two that could drift apart.
+
+"My chats" (`/my`) was the one page added that the spec didn't name
+directly: once messaging exists, a resident needs somewhere to find a
+thread again without re-finding the original listing on the board — doubly
+so once a listing is done and has dropped off the board entirely. It's
+intentionally thin: a list of listings you posted or messaged on, nothing
+graphical.
+
 ## Deliberately not this week
 
-The listing detail page is view-only. The rule that a runner marking a
-listing "done" makes it visible only to the people involved depends on
-chat/relationship data that doesn't exist yet — building it now would mean
-guessing at a data model crit 9 might not need. Both land together next
-week, alongside the required multi-user behaviour decision.
+No read receipts, no typing indicators, no "N people are looking at this"
+counts — none of that is needed to prove the real-time requirement, and
+each one is a new thing a session would have to broadcast and a stranger
+could infer something from. No way for a requester to see that someone else
+already asked (that's the cost ADR 0001 accepts on purpose, not an
+oversight). No notifications when the app isn't open in a tab — that's a
+service-worker-and-permissions problem on top of what crit 9 asks for,
+which is making already-open sessions agree with each other. Crit 10 adds
+server-side logging of what happened; nothing here writes a log beyond
+SQLite's own rows.
