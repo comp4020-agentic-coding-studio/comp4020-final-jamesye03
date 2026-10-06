@@ -29,7 +29,14 @@ Posting and browsing, persisted properly — restart the machine and a listing
 is still there until it actually expires. A runner names where they are, what
 they can carry back, and picks a deadline of up to two hours; anyone can
 browse the open board, newest first, and open a listing for the full detail.
-There's no chat yet — that's next.
+
+Anyone can message a runner about their listing, and the runner replies right
+there — each person who messages gets their own private thread with the
+runner; nobody sees anyone else's ([ADR 0001](docs/adr/0001-private-threads-per-requester.md)).
+A runner can mark their own listing done, which drops it off the public
+board but keeps the page working for everyone already talking on it. None of
+this needs a reload: a new listing, a new message, or a done mark shows up in
+every other open tab within about a second, over a WebSocket connection.
 
 ## What's deliberately not here
 
@@ -45,10 +52,7 @@ There's no chat yet — that's next.
 
 ## Coming next
 
-Crit 9 adds real messaging inside the app — right now a listing is
-view-only — plus the rule that a listing a runner marks done disappears from
-the public board and stays visible only to the people who were actually
-involved. Crit 10 adds server-side logging of what happened.
+Crit 10 adds server-side logging of what happened.
 
 ## Try it
 

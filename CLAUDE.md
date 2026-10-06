@@ -14,6 +14,16 @@ These follow from the argument in `README.md`.
   deadline stops appearing in queries; its row stays in the database. Never
   write a query, migration, or cleanup job that `DELETE`s a listing for
   having expired.
+- **Chat threads are private per requester.** A listing's messages are split
+  into one thread per person who messaged the runner. The runner may see
+  every thread on their own listing; a requester may only ever see the
+  thread they're part of. Never render, query, or broadcast a message to a
+  session that isn't the runner and isn't that thread's requester — see
+  [`docs/adr/0001-private-threads-per-requester.md`](docs/adr/0001-private-threads-per-requester.md).
+- **A "done" listing stays reachable, it doesn't disappear.** Marking a
+  listing done removes it from the public board query only. Its page must
+  keep working — never 404 or delete the row — for the runner and for
+  anyone who already has a thread on it.
 - **Restrained orange.** The theme colour is an accent — buttons, links,
   small highlights — never a background fill or a large block of colour.
 - **English only, mobile-first.** UI copy is English; layouts assume a phone
