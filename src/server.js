@@ -70,7 +70,19 @@ app.get("/", (req, res) => {
 });
 
 app.get("/my", (req, res) => {
-  res.send(renderMyChats({ sessionId: req.sessionId, listings: listingsForSession(req.sessionId) }));
+  res.send(
+    renderMyChats({
+      sessionId: req.sessionId,
+      listings: listingsForSession(req.sessionId),
+      nickname: readCookie(req, "nickname") ?? "",
+    }),
+  );
+});
+
+app.post("/my", (req, res) => {
+  const nickname = (req.body.nickname ?? "").trim();
+  if (nickname) res.setHeader("Set-Cookie", nicknameCookie(nickname));
+  res.redirect("/my");
 });
 
 app.get("/post", (req, res) => {

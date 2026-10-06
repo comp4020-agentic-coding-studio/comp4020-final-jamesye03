@@ -232,6 +232,26 @@ h1 {
   margin: 1rem 0;
 }
 
+.profile-form {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0 0 1.5rem;
+}
+
+.profile-form input {
+  flex: 1 1 14rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.profile-form button {
+  cursor: pointer;
+}
+
 .done-banner {
   margin: 1rem 0;
   padding: 0.7rem 0.9rem;

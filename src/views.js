@@ -211,7 +211,14 @@ export function renderListing({ listing, sessionId, isRunner, threads, nickname 
   });
 }
 
-export function renderMyChats({ sessionId, listings }) {
+function profileFormHtml(nickname) {
+  return `<form method="post" action="/my" class="profile-form">
+      <input name="nickname" value="${escapeHtml(nickname)}" maxlength="30" required placeholder="how people should ask for you" />
+      <button type="submit" class="button button-secondary">Save</button>
+    </form>`;
+}
+
+export function renderMyChats({ sessionId, listings, nickname = "" }) {
   const items = listings.length
     ? listings
         .map((l) => {
@@ -236,6 +243,8 @@ export function renderMyChats({ sessionId, listings }) {
     page: "my-chats",
     sessionId,
     body: `<h1>My chats</h1>
+    <h2>Your nickname</h2>
+    ${profileFormHtml(nickname)}
     <ul class="listing-list">${items}</ul>`,
   });
 }
