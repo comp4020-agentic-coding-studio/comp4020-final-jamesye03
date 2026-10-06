@@ -147,14 +147,14 @@ function chatForm({ listingId, thread = "", nickname = "" }) {
 // latest nickname (there's no account to label it with instead).
 // !isRunner: the viewer's own thread, which may not exist yet (empty + a
 // form is how a stranger starts one).
-function threadSectionHtml({ listingId, requesterSessionId, messages, heading }) {
+function threadSectionHtml({ listingId, requesterSessionId, messages, heading, nickname = "" }) {
   const list = messages.length
     ? messages.map(messageHtml).join("\n")
     : `<p class="empty-state">No messages yet.</p>`;
   return `<section class="chat-thread" data-thread="${escapeHtml(requesterSessionId)}">
       ${heading ? `<h3>${escapeHtml(heading)}</h3>` : ""}
       <ul class="chat-messages">${list}</ul>
-      ${chatForm({ listingId, thread: heading ? requesterSessionId : "" })}
+      ${chatForm({ listingId, thread: heading ? requesterSessionId : "", nickname })}
     </section>`;
 }
 
@@ -162,7 +162,7 @@ export function doneBannerHtml() {
   return `<p class="done-banner" data-done-banner>Marked done — off the public board now, but this page still works for everyone who was already talking here.</p>`;
 }
 
-export function renderListing({ listing, sessionId, isRunner, threads }) {
+export function renderListing({ listing, sessionId, isRunner, threads, nickname = "" }) {
   const threadsHtml = isRunner
     ? threads.length
       ? threads
@@ -172,6 +172,7 @@ export function renderListing({ listing, sessionId, isRunner, threads }) {
               requesterSessionId: t.requesterSessionId,
               messages: t.messages,
               heading: t.messages.at(-1)?.nickname ?? "Someone",
+              nickname,
             }),
           )
           .join("\n")
@@ -180,6 +181,7 @@ export function renderListing({ listing, sessionId, isRunner, threads }) {
         listingId: listing.id,
         requesterSessionId: sessionId,
         messages: threads[0]?.messages ?? [],
+        nickname,
       });
 
   return layout({

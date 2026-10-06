@@ -108,7 +108,15 @@ app.get("/listings/:id", (req, res) => {
   const threads = isRunner
     ? threadsForListing(listing.id)
     : [{ requesterSessionId: req.sessionId, messages: messagesForThread(listing.id, req.sessionId) }];
-  res.send(renderListing({ listing, sessionId: req.sessionId, isRunner, threads }));
+  res.send(
+    renderListing({
+      listing,
+      sessionId: req.sessionId,
+      isRunner,
+      threads,
+      nickname: readCookie(req, "nickname") ?? "",
+    }),
+  );
 });
 
 app.post("/listings/:id/messages", (req, res) => {
