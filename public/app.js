@@ -61,6 +61,8 @@
       } else if (page === "listing") {
         const el = document.getElementById("chat-threads");
         ws.send(JSON.stringify({ type: "subscribe", channel: "listing", id: Number(el.dataset.listingId) }));
+      } else if (page === "stats") {
+        ws.send(JSON.stringify({ type: "subscribe", channel: "stats" }));
       }
     });
 
@@ -96,6 +98,28 @@
         // applies wherever that card happens to be on screen; it's a no-op
         // via the null check above on any page with no matching card.
         setCardUnread(data.listingId, data.count);
+      } else if (data.type === "event") {
+        // /stats only: bump both window counters, no reload. A count here
+        // only ever grows between reloads — the "last hour" window's own
+        // aging-out happens server-side on the next full page load, same as
+        // any other simple stats page (crit 10 doesn't call for more).
+        document.querySelectorAll(`dd[data-type="${data.eventType}"]`).forEach((dd) => {
+          dd.textContent = String(Number(dd.textContent) + 1);
+        });
+        const feed = document.getElementById("stats-feed");
+        if (feed) {
+          const labels = {
+            listing_posted: "Posted a run",
+            listing_viewed: "Viewed a listing",
+            message_sent: "Sent a message",
+            listing_done: "Marked done",
+          };
+          const li = document.createElement("li");
+          li.dataset.type = data.eventType;
+          const link = data.listingId ? ` <a href="/listings/${data.listingId}">listing #${data.listingId}</a>` : "";
+          li.innerHTML = `<span class="stats-event-label">${labels[data.eventType] ?? data.eventType}</span> <span class="stats-event-who">${data.sessionHash}</span>${link} <span class="stats-event-time">just now</span>`;
+          feed.insertAdjacentElement("afterbegin", li);
+        }
       }
     });
 

@@ -249,3 +249,50 @@ it("renders a board card's unread badge only for the viewer actually involved in
   const strangerCard = strangerBoardHtml.slice(strangerBoardHtml.indexOf(`data-id="${listingId}"`));
   expect(strangerCard).toMatch(/<span class="badge-unread-corner" hidden><\/span>/);
 });
+
+// Crit 10's log line (PROCESS.md's crit-10 section, ADR 0003): every
+// meaningful action also pushes live to /stats over a new "stats" channel,
+// the same broadcast-on-success pattern as "board" and "me" above.
+it("pushes a listing_posted event to stats subscribers, hash-only who, no reload", async () => {
+  const ws = new WebSocket(wsUrl());
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  ws.send(JSON.stringify({ type: "subscribe", channel: "stats" }));
+
+  const marker = `spec-rt-stats-${Date.now()}`;
+  const received = new Promise<{ type: string; eventType: string; sessionHash: string }>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("no matching event within 2s")), 2000);
+    ws.on("message", (raw) => {
+      const data = JSON.parse(raw.toString());
+      if (data.type === "event" && data.eventType === "listing_posted") {
+        clearTimeout(timer);
+        resolve(data);
+      }
+    });
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const startedAt = Date.now();
+
+  const res = await fetch(new URL("/post", baseUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      origin: marker,
+      destination: "Spec Destination",
+      item: "spec item",
+      nickname: "spec-bot",
+      minutes: "15",
+    }),
+  });
+  expect(res.ok).toBe(true);
+
+  const event = await received;
+  expect(event.eventType).toBe("listing_posted");
+  expect(event.sessionHash).toMatch(/^[0-9a-f]{8}$/); // short hash, never the raw session id
+  expect(Date.now() - startedAt).toBeLessThan(1000);
+
+  ws.close();
+});

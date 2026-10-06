@@ -424,6 +424,56 @@ h1 {
   color: var(--muted);
 }
 
+.stats-counts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.3rem 0.8rem;
+  font-size: 0.95rem;
+  margin: 0 0 1.2rem;
+}
+
+.stats-counts dt {
+  color: var(--muted);
+}
+
+.stats-counts dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.stats-feed {
+  list-style: none;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.stats-feed li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.stats-event-who {
+  font-family: monospace;
+  color: var(--muted);
+}
+
+.stats-event-time {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.my-activity {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
 .button-secondary {
   background: #fff;
   color: var(--accent-dark);

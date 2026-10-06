@@ -237,3 +237,52 @@ to the board from a page that doesn't otherwise link there. It's now
 rendered with the existing `.button-secondary` treatment (the same one
 "Mark as done" already uses) plus a size bump past the usual button scale,
 so it reads as the deliberate action it is rather than incidental styling.
+
+## Crit 10, actually: what gets logged and where it's watched
+
+The "Crit 10 (best guess at the number — correct it if it's wrong)" label
+above was wrong — checking the course site directly made that clear. Crit
+10 is the observability week: a structured server-side log line for each
+thing a user does, a live way to watch those logs, and a "blind" demo where
+classmates click the deployed app while the presenter narrates from the
+logs alone. The rebrand, the live unread badges, and the About page above
+are real project work, but none of it is what this crit actually asks for.
+
+**Four events are logged, not every request.** `listing_posted`,
+`listing_viewed`, `message_sent`, `listing_done` — the app's actual
+mutating/standing actions. A plain `GET /`, `/my`, or `/about` is someone
+browsing, not doing something; logging those too would bury the four that
+matter in noise with no narration value.
+
+**One function, three outputs.** `logEvent` in `src/db.js` writes one row
+to a new `events` table and returns a shaped object; `src/server.js`'s
+`recordEvent` takes that return value and does the other two things with
+the exact same data: a `console.log`'d JSON line (so `flyctl logs` alone
+already satisfies the literal "write one structured log line" requirement)
+and a push to `/stats` over a new WebSocket channel. One call site per
+action, so the three outputs can't drift apart from each other.
+
+**"Who" is a short hash, not the raw `session_id` — see
+[`docs/adr/0003-hashed-identifiers-in-logs.md`](docs/adr/0003-hashed-identifiers-in-logs.md).**
+Logging "who" did something reopened the exact tradeoff ADR 0002 already
+settled for the board: `session_id` is this app's whole credential, and a
+log line is a new place it could leak — more so here, since `/stats` is a
+page that will be open on a projector in front of the class during the
+blind demo. The fix is the same shape as ADR 0002's, not a new one: hash it,
+keep enough of the hash to read as "same person, different action," never
+send the raw value anywhere but its owner's own browser.
+
+**`/stats` is the live view, not a terminal tail.** Crit 10 explicitly
+allows either; a page means the blind demo is just two browser tabs — the
+live app a classmate clicks, and this one the presenter narrates from —
+instead of a terminal window competing for screen space. It's built on the
+WebSocket broadcast machinery crit 9 already added (one more subscriber
+set, one more channel), not new real-time plumbing: all-time and
+last-hour counts per event type, plus a recent-events feed that updates
+live as events happen, both in page form.
+
+**The optional creepy mirror lives on `/my`.** A small box — "What we've
+recorded about you" — summing the same `events` table by the viewer's own
+session hash. Same privacy boundary the unread badges already draw: only
+ever a viewer's own standing data, server-computed, nothing new exposed to
+anyone else.

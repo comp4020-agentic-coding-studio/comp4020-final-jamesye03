@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -214,4 +215,75 @@ export function totalUnreadCount(sessionId) {
     (sum, l) => sum + unreadCount(l.id, sessionId, l.creator_session_id === sessionId),
     0,
   );
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    session_hash TEXT NOT NULL,
+    listing_id INTEGER,
+    detail TEXT,
+    created_at INTEGER NOT NULL
+  )
+`);
+
+const EVENT_TYPES = ["listing_posted", "listing_viewed", "message_sent", "listing_done"];
+
+// Short, not the full-length hash `ownerHash` in views.js uses: that one has
+// to match a client-recomputed value exactly, this one only has to read as
+// "same person, different action" in a log line or on the stats page. See
+// ADR 0003 — session_id is this app's whole auth credential (ADR 0002), and
+// a log line is a new place that could leak it, now doubly so once it's
+// shown live on a page during the crit demo.
+export function sessionHash(sessionId) {
+  return createHash("sha256").update(sessionId).digest("hex").slice(0, 8);
+}
+
+const insertEvent = db.prepare(`
+  INSERT INTO events (type, session_hash, listing_id, detail, created_at)
+  VALUES (@type, @session_hash, @listing_id, @detail, @created_at)
+`);
+
+// Logs only the app's actual mutating/standing actions — a listing posted,
+// viewed, messaged, or marked done — never a plain page browse. Returns the
+// shaped row so the caller (src/server.js) can console.log and broadcast the
+// exact same data it just persisted, instead of re-deriving it.
+export function logEvent({ type, sessionId, listingId = null, detail = null }) {
+  const created_at = Date.now();
+  const session_hash = sessionHash(sessionId);
+  insertEvent.run({
+    type,
+    session_hash,
+    listing_id: listingId,
+    detail: detail ? JSON.stringify(detail) : null,
+    created_at,
+  });
+  return { type, sessionHash: session_hash, listingId, detail, createdAt: created_at };
+}
+
+// All four types always present, defaulted to 0, so callers (the stats page)
+// never have to guard for a type with no rows yet.
+export function eventCounts(sinceMs = 0) {
+  const rows = db
+    .prepare(`SELECT type, COUNT(*) c FROM events WHERE created_at > ? GROUP BY type`)
+    .all(sinceMs);
+  const counts = Object.fromEntries(EVENT_TYPES.map((t) => [t, 0]));
+  for (const r of rows) counts[r.type] = r.c;
+  return counts;
+}
+
+// Newest first — the "log tail" bar, in page form (src/views.js renderStats).
+export function recentEvents(limit = 50) {
+  return db.prepare(`SELECT * FROM events ORDER BY created_at DESC LIMIT ?`).all(limit);
+}
+
+// The creepy mirror: one session's own counts, same shape as eventCounts.
+export function eventsForSession(sessionHashValue) {
+  const rows = db
+    .prepare(`SELECT type, COUNT(*) c FROM events WHERE session_hash = ? GROUP BY type`)
+    .all(sessionHashValue);
+  const counts = Object.fromEntries(EVENT_TYPES.map((t) => [t, 0]));
+  for (const r of rows) counts[r.type] = r.c;
+  return counts;
 }

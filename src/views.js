@@ -42,6 +42,7 @@ function layout({ title, body, page = "", sessionId = "", navUnread = 0 }) {
   <a class="brand" href="/"><span class="brand-mark"><span class="material-symbols-rounded" aria-hidden="true">delivery_dining</span></span> DormRunner</a>
   <nav class="site-nav">
     <a href="/about"><span class="material-symbols-rounded" aria-hidden="true">help</span> How it works</a>
+    <a href="/stats"><span class="material-symbols-rounded" aria-hidden="true">monitoring</span> Activity</a>
     <a href="/my">My chats<span class="badge-unread-nav" id="nav-unread"${navUnread ? "" : " hidden"}>${navUnread || ""}</span></a>
     <a class="button button-primary" href="/post"><span class="material-symbols-rounded" aria-hidden="true">add</span> Post</a>
   </nav>
@@ -244,7 +245,22 @@ function profileFormHtml(nickname) {
     </form>`;
 }
 
-export function renderMyChats({ sessionId, listings, nickname = "", navUnread = 0 }) {
+// The optional "creepy mirror" (crit 10): the same events table that feeds
+// /stats, filtered to this one viewer's own hash — never anyone else's, same
+// boundary the unread badges already draw. Only rendered when there's
+// something to show, so a brand-new visitor doesn't see an empty box.
+function myActivityHtml(myActivity) {
+  const total = Object.values(myActivity).reduce((a, b) => a + b, 0);
+  if (!total) return "";
+  return `<div class="my-activity">
+      <h2>What we've recorded about you</h2>
+      <p>${myActivity.listing_posted} posted, ${myActivity.message_sent} messages sent,
+      ${myActivity.listing_viewed} listings viewed, ${myActivity.listing_done} marked done.
+      That's everything — see <a href="/stats">Activity</a> for what's logged about everyone.</p>
+    </div>`;
+}
+
+export function renderMyChats({ sessionId, listings, nickname = "", navUnread = 0, myActivity = null }) {
   const items = listings.length
     ? listings
         .map((l) => {
@@ -273,7 +289,8 @@ export function renderMyChats({ sessionId, listings, nickname = "", navUnread = 
     body: `<h1>My chats</h1>
     <h2>Your nickname</h2>
     ${profileFormHtml(nickname)}
-    <ul class="listing-list">${items}</ul>`,
+    <ul class="listing-list">${items}</ul>
+    ${myActivity ? myActivityHtml(myActivity) : ""}`,
   });
 }
 
@@ -320,6 +337,61 @@ export function renderAbout({ sessionId = "", navUnread = 0 } = {}) {
         changing hands, sort it out directly with the other person, the
         same way you would with a friend.</li>
     </ul>`,
+  });
+}
+
+const EVENT_LABELS = {
+  listing_posted: "Posted a run",
+  listing_viewed: "Viewed a listing",
+  message_sent: "Sent a message",
+  listing_done: "Marked done",
+};
+
+function statsCountsHtml(counts, windowName) {
+  return `<dl class="stats-counts">
+    ${Object.entries(counts)
+      .map(
+        ([type, c]) =>
+          `<dt>${EVENT_LABELS[type] ?? type}</dt><dd data-type="${type}" data-window="${windowName}">${c}</dd>`,
+      )
+      .join("\n")}
+  </dl>`;
+}
+
+function statsEventHtml(e) {
+  return `<li data-type="${e.type}">
+      <span class="stats-event-label">${EVENT_LABELS[e.type] ?? e.type}</span>
+      <span class="stats-event-who">${e.sessionHash}</span>
+      ${e.listingLabel ? `<a href="/listings/${e.listingId}">${escapeHtml(e.listingLabel)}</a>` : ""}
+      <span class="stats-event-time">${timeAgo(e.createdAt)}</span>
+    </li>`;
+}
+
+// Crit 10's "live view" — a log tail or a simple stats page both count, no
+// heavyweight tooling needed. Built on the same WS broadcast machinery crit
+// 9 already added (a new "stats" channel, see src/server.js), so counts and
+// the recent-events feed below update live with no polling. "Who" is always
+// the short hash from db.js's sessionHash — see ADR 0003 for why not the
+// raw session id.
+export function renderStats({ allTime, lastHour, recent, sessionId = "", navUnread = 0 } = {}) {
+  return layout({
+    title: "Activity — DormRunner",
+    page: "stats",
+    sessionId,
+    navUnread,
+    body: `<h1>Activity</h1>
+    <p>What people have done on DormRunner, logged as it happens. "Who" is
+    shown as a short one-way code, never anyone's real identity — see
+    <a href="/readme/">the write-up</a> for why.</p>
+
+    <h2>Last hour</h2>
+    ${statsCountsHtml(lastHour, "hour")}
+
+    <h2>All time</h2>
+    ${statsCountsHtml(allTime, "all")}
+
+    <h2>Recent activity</h2>
+    <ul class="stats-feed" id="stats-feed">${recent.map(statsEventHtml).join("\n")}</ul>`,
   });
 }
 

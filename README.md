@@ -56,8 +56,10 @@ every other open tab within about a second, over a WebSocket connection.
 
 ## Coming next
 
-Server-side logging of what happened is still on the list for a future
-crit.
+Server-side logging of what happened (structured events, a live `/stats`
+view, and a small "what we've recorded about you" mirror on `/my`) landed
+this crit — see `docs/adr/0003-hashed-identifiers-in-logs.md` for how it
+keeps the same no-raw-identifier rule the rest of the app follows.
 
 ## Try it
 

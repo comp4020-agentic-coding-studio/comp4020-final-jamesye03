@@ -29,6 +29,13 @@ These follow from the argument in `README.md`.
   thread they're part of. Never render, query, or broadcast a message to a
   session that isn't the runner and isn't that thread's requester — see
   [`docs/adr/0001-private-threads-per-requester.md`](docs/adr/0001-private-threads-per-requester.md).
+- **Logs and the stats page never carry a raw `session_id`, only a short
+  hash of it.** Same reasoning as the chat-thread rule above: `session_id`
+  is this app's whole identity and access-control mechanism, so it never
+  goes anywhere but its own owner's browser — not into a broadcast payload,
+  and not into a structured log line or a stats page either, however useful
+  "who" is for narrating them. See
+  [`docs/adr/0003-hashed-identifiers-in-logs.md`](docs/adr/0003-hashed-identifiers-in-logs.md).
 - **A "done" listing stays reachable, it doesn't disappear.** Marking a
   listing done removes it from the public board query only. Its page must
   keep working — never 404 or delete the row — for the runner and for

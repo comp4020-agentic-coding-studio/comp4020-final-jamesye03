@@ -8,12 +8,17 @@ import {
   activeListings,
   addMessage,
   createListing,
+  eventCounts,
+  eventsForSession,
   hasThread,
   isInvolved,
   listingsForSession,
+  logEvent,
   markDone,
   markListingRead,
   messagesForThread,
+  recentEvents,
+  sessionHash,
   threadsForListing,
   totalUnreadCount,
   unreadCount,
@@ -31,6 +36,7 @@ import {
   renderNotFound,
   renderPostForm,
   renderReadme,
+  renderStats,
 } from "./views.js";
 
 const app = express();
@@ -92,6 +98,7 @@ app.get("/my", (req, res) => {
       listings,
       nickname: readCookie(req, "nickname") ?? "",
       navUnread: listings.reduce((sum, l) => sum + l.unread, 0),
+      myActivity: eventsForSession(sessionHash(req.sessionId)),
     }),
   );
 });
@@ -137,6 +144,7 @@ app.post("/post", (req, res) => {
   res.setHeader("Set-Cookie", nicknameCookie(nickname));
   res.redirect("/");
   broadcastBoard({ type: "new-listing", id, html: listingCardHtml(activeListing(id)) });
+  recordEvent("listing_posted", req.sessionId, id);
 });
 
 app.get("/listings/:id", (req, res) => {
@@ -168,6 +176,7 @@ app.get("/listings/:id", (req, res) => {
   // A second tab (e.g. still sitting on /my) should see this listing's
   // badge clear live too, not just on its own next reload.
   pushUnread(req.sessionId, listing.id);
+  recordEvent("listing_viewed", req.sessionId, listing.id, { isRunner });
 });
 
 app.post("/listings/:id/messages", (req, res) => {
@@ -219,6 +228,7 @@ app.post("/listings/:id/messages", (req, res) => {
   // The sender's own messages never count as unread to themselves (db.js),
   // so only the other party in this thread has anything to be pushed.
   pushUnread(isRunner ? requesterSessionId : listing.creator_session_id, listingId);
+  recordEvent("message_sent", req.sessionId, listingId, { isRunner });
 });
 
 app.post("/listings/:id/done", (req, res) => {
@@ -234,10 +244,37 @@ app.post("/listings/:id/done", (req, res) => {
 
   broadcastBoard({ type: "remove-listing", id: listingId });
   broadcastListing(listingId, { type: "done", html: doneBannerHtml() });
+  recordEvent("listing_done", req.sessionId, listingId);
 });
 
 app.get("/about", (req, res) => {
   res.send(renderAbout({ sessionId: req.sessionId, navUnread: totalUnreadCount(req.sessionId) }));
+});
+
+// Crit 10's required live view: a log tail or a simple stats page both
+// count. Built as a page rather than a terminal tail so the blind demo is
+// just two browser tabs — the deployed app a classmate clicks, and this one
+// the presenter narrates from.
+app.get("/stats", (req, res) => {
+  const recent = recentEvents(50).map((e) => {
+    const listing = e.listing_id ? activeListing(e.listing_id) : null;
+    return {
+      type: e.type,
+      sessionHash: e.session_hash,
+      listingId: e.listing_id,
+      createdAt: e.created_at,
+      listingLabel: listing ? `${listing.origin} → ${listing.destination}` : null,
+    };
+  });
+  res.send(
+    renderStats({
+      allTime: eventCounts(0),
+      lastHour: eventCounts(Date.now() - 60 * 60_000),
+      recent,
+      sessionId: req.sessionId,
+      navUnread: totalUnreadCount(req.sessionId),
+    }),
+  );
 });
 
 app.get("/readme/", (req, res) => {
@@ -257,10 +294,29 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const boardSubscribers = new Set();
 const listingSubscribers = new Map(); // listing id -> Set<{ ws, sessionId, isRunner }>
 const meSubscribers = new Map(); // sessionId -> Set<ws>
+const statsSubscribers = new Set();
 
 function broadcastBoard(event) {
   const payload = JSON.stringify(event);
   for (const ws of boardSubscribers) if (ws.readyState === ws.OPEN) ws.send(payload);
+}
+
+// Crit 10: a single structured log line (stdout, picked up by `flyctl logs`)
+// plus a SQLite row (src/db.js) plus a live push to /stats — one call site,
+// one shape, so none of the three can drift from the others. "who" is always
+// the short hash db.js computes, never the raw session id (ADR 0003).
+function recordEvent(type, sessionId, listingId, detail) {
+  const row = logEvent({ type, sessionId, listingId, detail });
+  console.log(JSON.stringify({ event: row.type, who: row.sessionHash, listingId: row.listingId, at: new Date(row.createdAt).toISOString(), ...detail }));
+  // "type" is this message's own envelope tag ("event"); the logged event's
+  // type (e.g. "listing_posted") travels separately as eventType, so the two
+  // never collide under one key.
+  broadcastStats({ type: "event", eventType: row.type, sessionHash: row.sessionHash, listingId: row.listingId, createdAt: row.createdAt });
+}
+
+function broadcastStats(event) {
+  const payload = JSON.stringify(event);
+  for (const ws of statsSubscribers) if (ws.readyState === ws.OPEN) ws.send(payload);
 }
 
 // Unread counts are pushed, never broadcast: this only ever reaches sockets
@@ -307,6 +363,12 @@ wss.on("connection", (ws, req) => {
     if (msg.type === "subscribe" && msg.channel === "board") {
       boardSubscribers.add(ws);
       ws.on("close", () => boardSubscribers.delete(ws));
+    } else if (msg.type === "subscribe" && msg.channel === "stats") {
+      // No privacy filtering needed: a stats event carries only a short
+      // hash, an event type, and a listing id — the same exposure level the
+      // board's own new-listing broadcast already has (ADR 0002).
+      statsSubscribers.add(ws);
+      ws.on("close", () => statsSubscribers.delete(ws));
     } else if (msg.type === "subscribe" && msg.channel === "me") {
       if (!sessionId) return;
       if (!meSubscribers.has(sessionId)) meSubscribers.set(sessionId, new Set());
