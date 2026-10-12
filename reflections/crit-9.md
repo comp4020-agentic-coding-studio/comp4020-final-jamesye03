@@ -2,28 +2,28 @@
 
 ## What was the breakthrough that moved the work forward?
 
-The breakthrough was realising the multi-user decision this crit asks for
-wasn't a technical question first — it was a question about what kind of
-app this is supposed to feel like. Once two people could message the same
-runner, the obvious default was a shared thread everyone sees. But
-`README.md` already says this is meant to feel like asking a neighbour a
-favour, not gig work, and a shared thread fails that test immediately: you'd
-never expect your text to a friend broadcast to every other friend who might
-ask them the same thing. Seeing that the "good" I'd already written down for
-this app in crit 7 was enough, on its own, to pick between the two designs —
-without needing a new argument invented for the occasion — is what made
-private-per-requester threads feel like the right call rather than just a
-defensible one. That's also what let me accept the tradeoff it creates
-(a requester can't see that someone already asked the same thing) instead of
-quietly designing it away.
+The breakthrough wasn't a design decision, it was deciding not to trust that
+the privacy feature was actually done just because the test suite said so.
+Everything — typecheck, the realtime tests, the thread-privacy tests — was
+green. But those tests all run as one process talking to itself; they never
+actually proved that two *different* people would see two different things.
+So I opened the app in one browser, posted a listing, then opened the same
+listing in a separate incognito window instead of a second tab — a same-
+browser tab would have shared the same cookie and just been me again, not a
+second person. The incognito window got a 404 on a listing that was still
+open, for a stranger who hadn't even sent a first message yet. The actual
+bug was `isInvolved()` being applied one line too broadly, fixed in
+`f166aba`. The breakthrough wasn't finding that one bug — it was noticing
+that "all tests pass" and "this works for two real people" aren't the same
+claim, and the gap between them is exactly where a privacy bug hides.
 
 ## What did this work change about who I want to be as a software developer?
 
-It made me more comfortable keeping a decision's cost visible instead of
-hiding it. It would have been easy to add a small feature to soften the
-duplicate-question problem and call the ADR "solved," but that cost is the
-actual price of the privacy the app is supposed to have, and I'd rather be
-able to say exactly what it costs and why it's worth it than pretend the
-tradeoff isn't there. I want to keep writing decisions down while I can
-still argue both sides, not after I've already committed and started
-rationalising.
+It made me distrust a green test suite as proof that a multi-user feature
+actually works for multiple users, especially when every existing test
+happens to run from inside one process pretending to be two people. I want
+to keep the habit of asking "would this actually survive two separate
+browsers, two separate humans" before calling something done — not instead
+of tests, but as the thing tests alone don't cover until someone writes a
+new one. The fix itself was small; noticing it needed checking by hand, not
+assuming automation already covered it, is the part I want to keep doing.
