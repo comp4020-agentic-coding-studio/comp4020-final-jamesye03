@@ -29,6 +29,14 @@ These follow from the argument in `README.md`.
   thread they're part of. Never render, query, or broadcast a message to a
   session that isn't the runner and isn't that thread's requester — see
   [`docs/adr/0001-private-threads-per-requester.md`](docs/adr/0001-private-threads-per-requester.md).
+- **An active (not-yet-done) listing is open to anyone, even someone who
+  hasn't messaged yet.** The private-threads rule above only ever restricts
+  who can see *messages*; it never gates the listing page itself until the
+  listing is done. Never require `isInvolved()` to open an active listing's
+  page or its WebSocket subscription — doing so blocks a stranger from ever
+  sending a first message, which is the one way any thread starts. (Found
+  the hard way in crit 9: a stranger got 404 on an active listing before
+  this rule was written down — see `PROCESS.md`.)
 - **Logs and the stats page never carry a raw `session_id`, only a short
   hash of it.** Same reasoning as the chat-thread rule above: `session_id`
   is this app's whole identity and access-control mechanism, so it never

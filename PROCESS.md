@@ -103,6 +103,23 @@ so once a listing is done and has dropped off the board entirely. It's
 intentionally thin: a list of listings you posted or messaged on, nothing
 graphical.
 
+**A privacy check applied one line too broadly, found by testing as two
+actual people.** The first version of `isInvolved()` gated both the page
+route and the WS subscribe handler unconditionally — correct once a listing
+is done, wrong before that, since a stranger who hasn't messaged yet isn't
+"involved" either. Caught by hand, not by the test suite: posted a listing
+in one browser, opened it from a separate incognito window (a same-browser
+second tab shares cookies and can't stand in for a second person), and got
+a 404 on a listing that was still open. The fix relaxes `isInvolved()`'s
+gate to apply only once `done_at` is set — the rule `POST
+/listings/:id/messages` already assumed — and a regression test (a cookie-
+less fetch against an active listing, expecting 200) went into
+`spec/realtime.test.ts` alongside it
+([`f166aba`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jamesye03/commit/f166aba)).
+The rule is now written down in `CLAUDE.md` rather than left implicit in the
+code, since the same predicate gets called from more than one place and
+"relax it in one call site" is exactly how this broke the first time.
+
 ## Deliberately not this week
 
 No read receipts, no typing indicators, no "N people are looking at this"
