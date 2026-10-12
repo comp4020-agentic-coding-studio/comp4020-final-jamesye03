@@ -36,7 +36,13 @@ runner; nobody sees anyone else's ([ADR 0001](docs/adr/0001-private-threads-per-
 A runner can mark their own listing done, which drops it off the public
 board but keeps the page working for everyone already talking on it. None of
 this needs a reload: a new listing, a new message, or a done mark shows up in
-every other open tab within about a second, over a WebSocket connection.
+every other open tab within about a second, over a WebSocket connection — and
+it holds up on a flaky connection too: the client reconnects and re-subscribes
+on its own if the socket drops.
+
+A first-time visitor can read [`/about`](/about) — a short, plain-language
+walkthrough of how to post and message, aimed at someone deciding whether to
+try the app rather than at a marker reading the repo.
 
 ## What's deliberately not here
 

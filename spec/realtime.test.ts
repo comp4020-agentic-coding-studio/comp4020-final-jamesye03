@@ -296,3 +296,76 @@ it("pushes a listing_posted event to stats subscribers, hash-only who, no reload
 
   ws.close();
 });
+
+// Every other test here fires one request at a time. The crit's own top band
+// names "two people acting at once" as the adversarial case, so this one
+// actually races two strangers' messages against the same listing with
+// Promise.all rather than assuming sequential requests are representative —
+// and checks the ADR 0001 privacy boundary still holds under that race, not
+// just in the one-at-a-time tests spec/threads.test.ts already covers.
+it("keeps two strangers' simultaneous messages in separate threads under real concurrency", async () => {
+  const ws = new WebSocket(wsUrl());
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  ws.send(JSON.stringify({ type: "subscribe", channel: "board" }));
+
+  const marker = `spec-rt-race-${Date.now()}`;
+  const newListing = new Promise<{ id: number }>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("no matching new-listing event within 2s")), 2000);
+    ws.on("message", (raw) => {
+      const data = JSON.parse(raw.toString());
+      if (data.type === "new-listing" && typeof data.html === "string" && data.html.includes(marker)) {
+        clearTimeout(timer);
+        resolve(data);
+      }
+    });
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await fetch(new URL("/post", baseUrl), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      origin: marker,
+      destination: "Spec Destination",
+      item: "spec item",
+      nickname: "spec-bot",
+      minutes: "15",
+    }),
+  });
+
+  const { id: listingId } = await newListing;
+  ws.close();
+
+  const [resAlice, resBob] = await Promise.all([
+    fetch(new URL(`/listings/${listingId}/messages`, baseUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", cookie: "session_id=spec-race-alice" },
+      body: new URLSearchParams({ nickname: "Alice", body: "alice's message" }),
+    }),
+    fetch(new URL(`/listings/${listingId}/messages`, baseUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", cookie: "session_id=spec-race-bob" },
+      body: new URLSearchParams({ nickname: "Bob", body: "bob's message" }),
+    }),
+  ]);
+  expect(resAlice.ok).toBe(true);
+  expect(resBob.ok).toBe(true);
+
+  // Alice's own view of the listing never shows Bob's message, even though
+  // both were written in the same instant, not one after the other.
+  const alicePage = await (
+    await fetch(new URL(`/listings/${listingId}`, baseUrl), { headers: { cookie: "session_id=spec-race-alice" } })
+  ).text();
+  expect(alicePage).toContain("alice&#39;s message");
+  expect(alicePage).not.toContain("bob&#39;s message");
+
+  const bobPage = await (
+    await fetch(new URL(`/listings/${listingId}`, baseUrl), { headers: { cookie: "session_id=spec-race-bob" } })
+  ).text();
+  expect(bobPage).toContain("bob&#39;s message");
+  expect(bobPage).not.toContain("alice&#39;s message");
+});
