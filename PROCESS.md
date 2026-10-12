@@ -286,3 +286,32 @@ recorded about you" — summing the same `events` table by the viewer's own
 session hash. Same privacy boundary the unread badges already draw: only
 ever a viewer's own standing data, server-computed, nothing new exposed to
 anyone else.
+
+## Testing claims the app already made, not just new ones
+
+A pass against the final-project rubric itself, not a new feature, landed in
+[`c4a7171`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jamesye03/commit/c4a7171).
+Three gaps, all about evidence rather than behaviour that needed changing:
+
+- **"Persists" was architecturally true and untested.** Every DB-touching
+  spec file writes through `src/db.js` and reads back within the same open
+  connection, in the same process — that proves the query logic, not
+  README's actual claim that a listing survives a restart. `spec/persistence.test.ts`
+  closes that connection and reopens the same file cold with a second,
+  independent `better-sqlite3` connection — the same shape as a real
+  process restart against the Fly volume — and reads the row back.
+- **No test raced two people against each other.** Every realtime test
+  fires one request, waits, then fires the next. The deployed-app criterion
+  names "two people acting at once" as its own adversarial case, so one new
+  test in `spec/realtime.test.ts` sends two strangers' messages to the same
+  listing with `Promise.all` instead of sequentially, and checks ADR 0001's
+  thread-privacy boundary holds under that race, not just one request at a
+  time.
+- **Two already-built things had no stated reason anywhere a marker would
+  read first.** The WebSocket client's reconnect-and-resubscribe behaviour
+  (`public/app.js`, built alongside crit 9's realtime work) and the `/about`
+  page (built for crit 10) both existed in the app with nothing about them
+  in README — and the marker's method is explicitly README, then
+  `CLAUDE.md`, then `spec/`, then the app, looking for the same idea in
+  each. Both got one sentence each in README rather than a new section,
+  since neither changed what the app does.
